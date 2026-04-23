@@ -3,136 +3,92 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Intelligent Workflow Copilot</title>
+    <title>Fraud Detection Copilot</title>
     <style>
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background-color: #f4f7f6;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            height: 100vh;
-            margin: 0;
-        }
-        .chat-container {
-            width: 400px;
-            background: white;
-            border-radius: 12px;
-            box-shadow: 0 8px 24px rgba(0,0,0,0.1);
-            display: flex;
-            flex-direction: column;
-            overflow: hidden;
-        }
-        .chat-header {
-            background: #2c3e50;
-            color: white;
-            padding: 16px;
-            text-align: center;
-            font-weight: bold;
-        }
-        .chat-box {
-            height: 400px;
-            padding: 16px;
-            overflow-y: auto;
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
-            background: #fafafa;
-        }
-        .message {
-            max-width: 80%;
-            padding: 10px 14px;
-            border-radius: 8px;
-            font-size: 14px;
-            line-height: 1.4;
-        }
-        .message.user {
-            background: #3498db;
-            color: white;
-            align-self: flex-end;
-            border-bottom-right-radius: 0;
-        }
-        .message.bot {
-            background: #e9ecef;
-            color: #333;
-            align-self: flex-start;
-            border-bottom-left-radius: 0;
-        }
-        .input-area {
-            display: flex;
-            padding: 12px;
-            background: white;
-            border-top: 1px solid #ddd;
-        }
-        input[type="text"] {
-            flex: 1;
-            padding: 10px;
-            border: 1px solid #ccc;
-            border-radius: 6px;
-            outline: none;
-        }
-        button {
-            background: #3498db;
-            color: white;
-            border: none;
-            padding: 10px 16px;
-            margin-left: 8px;
-            border-radius: 6px;
-            cursor: pointer;
-            font-weight: bold;
-        }
-        button:hover {
-            background: #2980b9;
-        }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f7f6; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
+        .chat-container { width: 450px; background: white; border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.1); display: flex; flex-direction: column; overflow: hidden; }
+        .chat-header { background: #2c3e50; color: white; padding: 16px; text-align: center; font-weight: bold; }
+        .chat-box { height: 450px; padding: 16px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; background: #fafafa; }
+        .message { max-width: 85%; padding: 10px 14px; border-radius: 8px; font-size: 14px; line-height: 1.4; word-wrap: break-word; }
+        .message.user { background: #3498db; color: white; align-self: flex-end; border-bottom-right-radius: 0; }
+        .message.bot { background: #e9ecef; color: #333; align-self: flex-start; border-bottom-left-radius: 0; white-space: pre-wrap; }
+        .input-area { display: flex; flex-direction: column; padding: 12px; background: white; border-top: 1px solid #ddd; }
+        .input-row { display: flex; width: 100%; gap: 8px; }
+        input[type="text"] { flex: 1; padding: 10px; border: 1px solid #ccc; border-radius: 6px; outline: none; }
+        button { background: #3498db; color: white; border: none; padding: 10px 16px; border-radius: 6px; cursor: pointer; font-weight: bold; }
+        button:hover { background: #2980b9; }
+        .file-label { font-size: 12px; color: #666; margin-bottom: 5px; }
     </style>
 </head>
 <body>
 
 <div class="chat-container">
-    <div class="chat-header">Support Copilot</div>
+    <div class="chat-header">LHDN Fraud Detective Agent</div>
     <div class="chat-box" id="chat-box">
-        <div class="message bot">Hello! How can we assist you today?</div>
+        <div class="message bot">Upload an e-invoice (Image or XML) to verify it against the LHDN schema and our corporate database.</div>
     </div>
     <div class="input-area">
-        <input type="text" id="user-input" placeholder="Type your message..." onkeypress="handleKeyPress(event)">
-        <button onclick="sendMessage()">Send</button>
+        <div class="file-label" id="file-name-display">No file selected</div>
+        <div class="input-row">
+            <input type="file" id="file-upload" accept="image/png, image/jpeg, text/xml, application/pdf" style="display: none;" onchange="updateFileName()">
+            <button onclick="document.getElementById('file-upload').click()" style="background: #7f8c8d;">📎 Attach</button>
+            
+            <input type="text" id="user-input" placeholder="Type instructions..." onkeypress="handleKeyPress(event)">
+            <button onclick="sendMessage()">Scan</button>
+        </div>
     </div>
 </div>
 
 <script>
-    // Generate a simple random session ID for testing
     const sessionId = Math.random().toString(36).substring(7);
+
+    function updateFileName() {
+        const fileInput = document.getElementById('file-upload');
+        const display = document.getElementById('file-name-display');
+        display.textContent = fileInput.files.length > 0 ? "Attached: " + fileInput.files[0].name : "No file selected";
+    }
 
     async function sendMessage() {
         const inputField = document.getElementById("user-input");
-        const messageText = inputField.value.trim();
-        if (!messageText) return;
+        const fileInput = document.getElementById("file-upload");
+        const messageText = inputField.value.trim() || "Please analyze this invoice.";
+        const file = fileInput.files[0];
 
-        // 1. Display User Message
-        appendMessage(messageText, "user");
+        if (!messageText && !file) return;
+
+        // Display User Message
+        appendMessage(file ? `📎 [File: ${file.name}]\n${messageText}` : messageText, "user");
+        
+        // Prepare Form Data for File + Text
+        const formData = new FormData();
+        formData.append("message", messageText);
+        formData.append("session_id", sessionId);
+        if (file) {
+            formData.append("file", file);
+        }
+
+        // Reset inputs
         inputField.value = "";
+        fileInput.value = "";
+        updateFileName();
+        appendMessage("Analyzing document with Z.AI...", "bot"); // Loading state
 
-        // 2. Send Data to Python Backend
         try {
             const response = await fetch("http://localhost:8000/api/chat", {
                 method: "POST",
-                headers: {
-                    "Content-Type": "application/json"
-                },
-                body: JSON.stringify({
-                    message: messageText,
-                    session_id: sessionId
-                })
+                body: formData // Note: fetch automatically sets the correct multipart headers for FormData
             });
 
             const data = await response.json();
             
-            // 3. Display Copilot Response
+            // Remove loading message and display real response
+            const chatBox = document.getElementById("chat-box");
+            chatBox.removeChild(chatBox.lastChild);
             appendMessage(data.reply, "bot");
 
         } catch (error) {
-            console.error("Error connecting to backend:", error);
-            appendMessage("Error: Could not connect to the server.", "bot");
+            console.error("Error:", error);
+            appendMessage("Error: Could not connect to the backend.", "bot");
         }
     }
 
@@ -142,13 +98,11 @@
         msgDiv.className = `message ${sender}`;
         msgDiv.textContent = text;
         chatBox.appendChild(msgDiv);
-        chatBox.scrollTop = chatBox.scrollHeight; // Auto-scroll to bottom
+        chatBox.scrollTop = chatBox.scrollHeight;
     }
 
     function handleKeyPress(event) {
-        if (event.key === "Enter") {
-            sendMessage();
-        }
+        if (event.key === "Enter") sendMessage();
     }
 </script>
 
