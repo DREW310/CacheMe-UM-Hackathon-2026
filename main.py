@@ -115,6 +115,15 @@ async def chat_endpoint(
     base64_image = None
     xml_text = None
 
+    # --- NEW: Check if this is completed data from the frontend ---
+    if message.startswith("FINAL_DATA:"):
+        extracted_data = json.loads(message.replace("FINAL_DATA:", ""))
+    
+    # --- Normal AI Extraction Flow ---
+    else:
+        base64_image = None
+        xml_text = None
+
     # Step 1: Process the uploaded file
     if file:
         file_bytes = await file.read()
@@ -129,6 +138,36 @@ async def chat_endpoint(
 
     # Step 2: Send to AI for Extraction
     extracted_data = analyze_document_with_ai(message, base64_image, xml_text)
+
+    # Step 2.5: Human-in-the-Loop Validation (Check for blanks)
+    missing_fields = []
+    
+    # Safely check if fields exist and are not empty strings or null
+    invoice_num = extracted_data.get('invoice_metadata', {}).get('invoice_number')
+    if not invoice_num or invoice_num == "null" or invoice_num.strip() == "":
+        missing_fields.append("Invoice Number")
+        
+    supplier_name = extracted_data.get('supplier_details', {}).get('name')
+    if not supplier_name or supplier_name == "null" or supplier_name.strip() == "":
+        missing_fields.append("Supplier Name")
+
+    if missing_fields:
+        missing_list_html = "".join([f"<li><b>{field}</b></li>" for field in missing_fields])
+        
+        interactive_reply = (
+            f"⚠️ **Incomplete Data Detected**\n"
+            f"The AI could not read the following required fields from the document:\n"
+            f"<ul>{missing_list_html}</ul>\n"
+            f"Please type the missing information into the input box below to resume the workflow."
+        )
+        
+        # Notice we are now sending the actual array of missing fields back to the frontend!
+        return {
+            "reply": interactive_reply, 
+            "action": "AWAITING_USER_DECISION",
+            "missing_fields": missing_fields,
+            "partial_data": extracted_data
+        }
 
     # If the API call failed (e.g., dummy key), return a mock response for testing
     if "error" in extracted_data:
@@ -205,6 +244,7 @@ async def chat_endpoint(
             conn.close()
 
     # Step 4: Format the final response for the user interface
+    # Step 4: Format the final response for the user interface
     status_header = "🛑 **FRAUD DETECTED**" if fraud_flags else "✅ **INVOICE APPROVED**"
     
     formatted_reply = f"{status_header}\n\n"
@@ -214,7 +254,20 @@ async def chat_endpoint(
     
     formatted_reply += "**System Checks:**\n" + "\n".join(verification_summary) + "\n\n"
     
-    # Optional: Include the raw JSON to show judges the extraction worked
-    formatted_reply += f"*(Extracted JSON data attached below)*\n```json\n{json.dumps(extracted_data, indent=2)}\n```"
+    # --- UPGRADED QoL DATA FORMATTING ---
+    formatted_reply += "*(Extracted Invoice Data)*\n"
+    supplier = extracted_data.get('supplier_details', {})
+    buyer = extracted_data.get('buyer_details', {})
+    metadata = extracted_data.get('invoice_metadata', {})
+    financials = extracted_data.get('financials', {})
+    
+    formatted_reply += f"• **Supplier Name:** {supplier.get('name', 'N/A')}\n"
+    formatted_reply += f"• **Supplier TIN:** {supplier.get('tin', 'N/A')}\n"
+    formatted_reply += f"• **SSM Number:** {supplier.get('registration_number', 'N/A')}\n"
+    formatted_reply += f"• **Buyer Name:** {buyer.get('name', 'N/A')}\n"
+    formatted_reply += f"• **Invoice Number:** {metadata.get('invoice_number', 'N/A')}\n"
+    formatted_reply += f"• **Issue Date:** {metadata.get('issue_date', 'N/A')}\n"
+    formatted_reply += f"• **LHDN UUID:** {metadata.get('lhdn_uuid', 'N/A')}\n"
+    formatted_reply += f"• **Grand Total:** RM {financials.get('grand_total', 0)}\n"
 
     return {"reply": formatted_reply, "action": "ANALYSIS_COMPLETE"}

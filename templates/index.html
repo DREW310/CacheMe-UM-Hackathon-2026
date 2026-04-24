@@ -45,7 +45,7 @@
             <button class="mic-btn" id="mic-btn" onclick="toggleDictation()" title="Click to speak">🎤</button>
             
             <input type="text" id="user-input" placeholder="Type or speak instructions..." onkeypress="handleKeyPress(event)">
-            <button onclick="sendMessage()">Scan</button>
+            <button id="scan-btn" onclick="sendMessage()">Scan</button>
         </div>
     </div>
 </div>
@@ -53,12 +53,11 @@
 <script>
     const sessionId = Math.random().toString(36).substring(7);
 
-    // --- File Handling ---
+    // --- File Handling & Voice ---
     function updateFileName() {
         const fileInput = document.getElementById('file-upload');
         const display = document.getElementById('file-name-display');
         const removeBtn = document.getElementById('remove-file-btn');
-        
         if (fileInput.files.length > 0) {
             display.textContent = "📎 Attached: " + fileInput.files[0].name;
             removeBtn.style.display = "block";
@@ -73,87 +72,124 @@
         updateFileName();
     }
 
-    // --- Voice Recognition (Web Speech API) ---
     let recognition;
     if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
         recognition = new SpeechRecognition();
         recognition.continuous = false;
         recognition.interimResults = false;
-        recognition.lang = 'en-US'; // Or 'ms-MY' for Malay!
-
-        recognition.onresult = function(event) {
-            const transcript = event.results[0][0].transcript;
+        recognition.lang = 'en-US'; 
+        recognition.onresult = function(e) {
+            const transcript = e.results[0][0].transcript;
             const inputField = document.getElementById('user-input');
             inputField.value = inputField.value ? inputField.value + " " + transcript : transcript;
             stopDictationUI();
         };
-
-        recognition.onerror = function(event) {
-            console.error("Speech recognition error", event.error);
-            stopDictationUI();
-        };
-
-        recognition.onend = function() {
-            stopDictationUI();
-        };
+        recognition.onerror = stopDictationUI;
+        recognition.onend = stopDictationUI;
     }
 
     function toggleDictation() {
         const micBtn = document.getElementById('mic-btn');
-        if (!recognition) {
-            alert("Voice recording is not supported in this browser. Please use Chrome or Edge.");
-            return;
-        }
-
-        if (micBtn.classList.contains('recording')) {
-            recognition.stop();
-            stopDictationUI();
-        } else {
-            micBtn.classList.add('recording');
-            recognition.start();
-        }
+        if (!recognition) return alert("Voice not supported.");
+        if (micBtn.classList.contains('recording')) { recognition.stop(); stopDictationUI(); } 
+        else { micBtn.classList.add('recording'); recognition.start(); }
     }
+    function stopDictationUI() { document.getElementById('mic-btn').classList.remove('recording'); }
 
-    function stopDictationUI() {
-        document.getElementById('mic-btn').classList.remove('recording');
-    }
+    // --- Agentic State Management ---
+    let pendingFieldsToFix = []; 
+    let currentExtractedData = null; 
 
     // --- Chat Logic ---
     async function sendMessage() {
         const inputField = document.getElementById("user-input");
         const fileInput = document.getElementById("file-upload");
-        const messageText = inputField.value.trim() || "Please analyze this invoice.";
+        const scanBtn = document.getElementById("scan-btn"); 
+        const messageText = inputField.value.trim();
         const file = fileInput.files[0];
 
-        if (!messageText && !file) return;
-
-        appendMessage(file ? `📎 [File: ${file.name}]\n${messageText}` : messageText, "user");
-        
-        const formData = new FormData();
-        formData.append("message", messageText);
-        formData.append("session_id", sessionId);
-        if (file) {
-            formData.append("file", file);
+        // --- SCENARIO A: User is fixing missing fields ---
+        if (pendingFieldsToFix.length > 0) {
+            if (!messageText) return;
+            
+            appendMessage(`Providing: ${messageText}`, "user");
+            
+            // Map their answer to the correct JSON field locally
+            let fieldName = pendingFieldsToFix[0];
+            if (fieldName === "Invoice Number") currentExtractedData.invoice_metadata.invoice_number = messageText;
+            if (fieldName === "Supplier Name") currentExtractedData.supplier_details.name = messageText;
+            
+            pendingFieldsToFix.shift(); // Remove from queue
+            inputField.value = "";
+            
+            // Still more fields to fix? Ask locally without hitting the server!
+            if (pendingFieldsToFix.length > 0) {
+                inputField.placeholder = `Please enter: ${pendingFieldsToFix[0]}...`;
+                appendMessage(`Got it! Now I just need: **${pendingFieldsToFix[0]}**`, "bot");
+                return; 
+            } 
+            
+            // All done! Send the completed JSON to the server
+            inputField.placeholder = "Type or speak instructions...";
+            scanBtn.textContent = "Scan";
+            scanBtn.style.backgroundColor = "#3498db";
+            
+            appendMessage("All data collected! Verifying with the database...", "bot");
+            
+            const formData = new FormData();
+            formData.append("message", "FINAL_DATA:" + JSON.stringify(currentExtractedData));
+            formData.append("session_id", sessionId);
+            sendDataToBackend(formData);
+            return;
         }
 
+        // --- SCENARIO B: Normal Document Scan ---
+        if (!messageText && !file) return;
+
+        appendMessage(file ? `📎 [File: ${file.name}]\n${messageText || "Please analyze this invoice."}` : messageText, "user");
+        
+        const formData = new FormData();
+        formData.append("message", messageText || "Please analyze this invoice.");
+        formData.append("session_id", sessionId);
+        if (file) { formData.append("file", file); }
+
         inputField.value = "";
-        clearFile(); // Auto-clear file after sending
+        clearFile(); 
         appendMessage("Analyzing document with Z.AI...", "bot"); 
+        sendDataToBackend(formData);
+    }
 
+    async function sendDataToBackend(formData) {
         try {
-            const response = await fetch("http://localhost:8000/api/chat", {
-                method: "POST",
-                body: formData
-            });
-
+            const response = await fetch("http://localhost:8000/api/chat", { method: "POST", body: formData });
             const data = await response.json();
+            
             const chatBox = document.getElementById("chat-box");
-            chatBox.removeChild(chatBox.lastChild);
-            appendMessage(data.reply, "bot");
+            chatBox.removeChild(chatBox.lastChild); 
+            
+            if (data.action === "AWAITING_USER_DECISION") {
+                pendingFieldsToFix = data.missing_fields;
+                currentExtractedData = data.partial_data; // Store the clipboard data
+                
+                const inputField = document.getElementById("user-input");
+                const scanBtn = document.getElementById("scan-btn");
+                inputField.placeholder = `Please enter: ${pendingFieldsToFix[0]}...`;
+                inputField.focus();
+                scanBtn.textContent = "💾 Save";
+                scanBtn.style.backgroundColor = "#f39c12"; 
+            }
+            
+            const msgDiv = document.createElement("div");
+            msgDiv.className = "message bot";
+            msgDiv.innerHTML = data.reply.replace(/\n/g, '<br>');
+            chatBox.appendChild(msgDiv);
+            chatBox.scrollTop = chatBox.scrollHeight;
 
         } catch (error) {
             console.error("Error:", error);
+            const chatBox = document.getElementById("chat-box");
+            chatBox.removeChild(chatBox.lastChild);
             appendMessage("Error: Could not connect to the backend.", "bot");
         }
     }
@@ -162,14 +198,12 @@
         const chatBox = document.getElementById("chat-box");
         const msgDiv = document.createElement("div");
         msgDiv.className = `message ${sender}`;
-        msgDiv.textContent = text;
+        msgDiv.innerHTML = text.replace(/\n/g, '<br>'); 
         chatBox.appendChild(msgDiv);
         chatBox.scrollTop = chatBox.scrollHeight;
     }
 
-    function handleKeyPress(event) {
-        if (event.key === "Enter") sendMessage();
-    }
+    function handleKeyPress(event) { if (event.key === "Enter") sendMessage(); }
 </script>
 
 </body>
