@@ -4,6 +4,7 @@ import sqlite3
 import requests
 import json
 import base64
+import time
 
 app = FastAPI()
 
@@ -18,92 +19,25 @@ app.add_middleware(
 # ---------------------------------------------------------
 # 1. THE LHDN SCHEMA TOOL (Forces AI to return perfect JSON)
 # ---------------------------------------------------------
-tools = [
+system_instruction = """
+    You are a strict data extraction agent for LHDN invoice compliance. 
+    You MUST extract the data from the invoice and return it EXACTLY as a valid JSON object matching this exact structure:
     {
-        "type": "function",
-        "function": {
-            "name": "extract_full_lhdn_invoice",
-            "description": "Extract all mandatory LHDN e-invoice fields for deep compliance and fraud verification.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "supplier_details": {
-                        "type": "object",
-                        "properties": {
-                            "name": {"type": "string"},
-                            "tin": {"type": "string", "description": "Supplier Tax ID"},
-                            "registration_number": {"type": "string", "description": "SSM Number"},
-                            "msic_code": {"type": "string"}
-                        },
-                        "required": ["name", "tin", "registration_number"]
-                    },
-                    "buyer_details": {
-                        "type": "object",
-                        "properties": {
-                            "name": {"type": "string"},
-                            "tin": {"type": "string"}
-                        },
-                        "required": ["name", "tin"]
-                    },
-                    "invoice_metadata": {
-                        "type": "object",
-                        "properties": {
-                            "invoice_number": {"type": "string"},
-                            "issue_date": {"type": "string"},
-                            "lhdn_uuid": {"type": "string", "description": "Crucial for LHDN validation. Null if missing."}
-                        },
-                        "required": ["invoice_number", "issue_date"]
-                    },
-                    "financials": {
-                        "type": "object",
-                        "properties": {
-                            "subtotal": {"type": "number"},
-                            "total_tax": {"type": "number"},
-                            "grand_total": {"type": "number"}
-                        },
-                        "required": ["subtotal", "total_tax", "grand_total"]
-                    },
-                    "line_items": {
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "description": {"type": "string"},
-                                "unit_price": {"type": "number"},
-                                "quantity": {"type": "number"}
-                            }
-                        }
-                    }
-                },
-                "required": ["supplier_details", "buyer_details", "invoice_metadata", "financials", "line_items"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "ask_clarification",
-            "description": "Use this tool ONLY if the invoice image is too blurry, missing critical fields, or cannot be read.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "question": {
-                        "type": "string",
-                        "description": "The specific question to ask the user to clarify the missing information."
-                    }
-                },
-                "required": ["question"]
-            }
-        }
+      "supplier_details": {"name": "", "tin": "", "registration_number": "", "msic_code": ""},
+      "buyer_details": {"name": "", "tin": ""},
+      "invoice_metadata": {"invoice_number": "", "issue_date": "", "lhdn_uuid": "null if missing"},
+      "financials": {"subtotal": 0, "total_tax": 0, "grand_total": 0},
+      "line_items": [{"description": "", "unit_price": 0, "quantity": 0, "sku": ""}]
     }
-]
+    Return ONLY the raw JSON object. Do not include markdown formatting like ```json. Do not include any other text.
+    """
 
 # ---------------------------------------------------------
 # 2. THE AI REASONING ENGINE
 # ---------------------------------------------------------
 def analyze_document_with_ai(prompt_text, base64_image=None, xml_text=None):
-    api_url = "https://api.z.ai/v1/chat/completions" # <-- Replace with actual API URL
-    api_key = "YOUR_Z_AI_API_KEY_HERE"               # <-- Replace with actual API Key
+    api_url = "XXX" # <-- Replace with actual API URL
+    api_key = "YYY"               # <-- Replace with actual API Key
     
     headers = {
         "Authorization": f"Bearer {api_key}",
@@ -114,39 +48,60 @@ def analyze_document_with_ai(prompt_text, base64_image=None, xml_text=None):
     user_content = [{"type": "text", "text": prompt_text}]
     
     if base64_image:
-        user_content.append({
-            "type": "image_url",
-            "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}
-        })
-    if xml_text:
-        user_content.append({"type": "text", "text": f"Raw XML Data: {xml_text}"})
+        # Use complex multimodal array ONLY if an image is attached
+        user_content = [
+            {"type": "text", "text": prompt_text},
+            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}
+        ]
+    else:
+        # Use standard text string for XML to prevent API 500 crashes
+        user_content = prompt_text
+        if xml_text:
+            user_content += f"\n\n--- RAW INVOICE DATA ---\n{xml_text}"
 
     payload = {
-        "model": "glm-vision-main", # <-- Ensure you use a multimodal model ID
+        "model": "ilmu-glm-5.1",
         "messages": [
-            {"role": "system", "content": "You are a strict data extraction agent for LHDN invoice compliance."},
+            {"role": "system", "content": system_instruction},
             {"role": "user", "content": user_content}
-        ],
-        "tools": [lhdn_extraction_tool],
-        "tool_choice": {"type": "function", "function": {"name": "extract_full_lhdn_invoice"}} # Force the AI to use the tool
+        ]
+        # Notice we completely removed the 'tools' and 'tool_choice' parameters!
     }
 
-    try:
-        response = requests.post(api_url, headers=headers, json=payload)
-        response.raise_for_status()
-        response_data = response.json()
-        
-        # Extract the JSON arguments returned by the tool
-        tool_calls = response_data['choices'][0]['message'].get('tool_calls', [])
-        if tool_calls:
-            extracted_json_str = tool_calls[0]['function']['arguments']
-            return json.loads(extracted_json_str)
-        else:
-            return {"error": "AI failed to extract structured data."}
+    max_retries = 2
+    for attempt in range(max_retries):
+        try:
+            # We add a 60-second timeout so our code doesn't hang forever
+            response = requests.post(api_url, headers=headers, json=payload, timeout=60)
+            response.raise_for_status()
+            response_data = response.json()
+            
+            message_data = response_data['choices'][0]['message']
+            content = message_data.get('content', '')
+            
+            if "{" in content and "}" in content:
+                start = content.find('{')
+                end = content.rfind('}') + 1
+                return json.loads(content[start:end])
+                
+            return {"error": "AI response did not contain valid JSON."}
 
-    except Exception as e:
-        print(f"API Error: {e}")
-        return {"error": str(e)}
+        except requests.exceptions.Timeout:
+            if attempt < max_retries - 1:
+                print(f"ILMU Server is slow. Retrying... (Attempt {attempt + 2})")
+                time.sleep(2) # Wait 2 seconds before trying again
+                continue
+            return {"error": "ILMU API timed out. The server is currently too slow or overloaded."}
+            
+        except Exception as e:
+            # Catch 504s and other server errors
+            if "504" in str(e) and attempt < max_retries - 1:
+                print(f"ILMU 504 Gateway Timeout. Retrying... (Attempt {attempt + 2})")
+                time.sleep(2)
+                continue
+                
+            print(f"API Error: {e}")
+            return {"error": f"ILMU Server Error: {str(e)}"}
 
 # ---------------------------------------------------------
 # 3. FASTAPI ENDPOINT (Receives File + Text)
@@ -177,7 +132,11 @@ async def chat_endpoint(
 
     # If the API call failed (e.g., dummy key), return a mock response for testing
     if "error" in extracted_data:
-        return {"reply": f"System Error or Dummy Key used. Here is what the pipeline attempted to do:\n\n1. Received file type: {file.content_type if file else 'None'}\n2. Processed for AI.\n3. Awaiting real API keys."}
+        actual_error = extracted_data["error"]
+        return {
+            "reply": f"🚨 **AI Extraction Failed!**\n\nHere is the exact reason why:\n{actual_error}", 
+            "action": "ERROR"
+        }
 
     # Step 3: Run Database Verification against local umhackathon_2026.db
     fraud_flags = []
