@@ -32,7 +32,7 @@
 <div class="chat-container">
     <div class="chat-header">LHDN Fraud Detective Agent</div>
     <div class="chat-box" id="chat-box">
-        <div class="message bot">Upload an e-invoice (Image or XML) to verify it against the LHDN schema and our corporate database. You can also use the microphone to add verbal instructions!</div>
+        <div class="message bot">Upload an e-invoice (Image, XML, JSON, PDF, Word, or Excel) to verify it against the LHDN schema and our corporate database. You can also use the microphone to add verbal instructions!</div>
     </div>
     <div class="input-area">
         <div class="file-info">
@@ -40,7 +40,7 @@
             <button class="remove-file" id="remove-file-btn" onclick="clearFile()">❌ Remove</button>
         </div>
         <div class="input-row">
-            <input type="file" id="file-upload" accept="image/png, image/jpeg, text/xml, application/pdf" style="display: none;" onchange="updateFileName()">
+            <input type="file" id="file-upload" accept=".png, .jpg, .jpeg, .xml, .json, .docx, .xlsx, .pdf" style="display: none;" onchange="updateFileName()">
             <button onclick="document.getElementById('file-upload').click()" style="background: #7f8c8d;">📎</button>
             <button class="mic-btn" id="mic-btn" onclick="toggleDictation()" title="Click to speak">🎤</button>
             
@@ -115,15 +115,19 @@
             
             appendMessage(`Providing: ${messageText}`, "user");
             
-            // Map their answer to the correct JSON field locally
             let fieldName = pendingFieldsToFix[0];
+            
+            // 🚨 THE SAFETY NET: Create folders if AI failed to make them
+            if (!currentExtractedData.invoice_metadata) currentExtractedData.invoice_metadata = {};
+            if (!currentExtractedData.supplier_details) currentExtractedData.supplier_details = {};
+            
             if (fieldName === "Invoice Number") currentExtractedData.invoice_metadata.invoice_number = messageText;
             if (fieldName === "Supplier Name") currentExtractedData.supplier_details.name = messageText;
             
             pendingFieldsToFix.shift(); // Remove from queue
             inputField.value = "";
             
-            // Still more fields to fix? Ask locally without hitting the server!
+            // Still more fields to fix? Ask locally!
             if (pendingFieldsToFix.length > 0) {
                 inputField.placeholder = `Please enter: ${pendingFieldsToFix[0]}...`;
                 appendMessage(`Got it! Now I just need: **${pendingFieldsToFix[0]}**`, "bot");
@@ -147,10 +151,10 @@
         // --- SCENARIO B: Normal Document Scan ---
         if (!messageText && !file) return;
 
-        appendMessage(file ? `📎 [File: ${file.name}]\n${messageText || "Please analyze this invoice."}` : messageText, "user");
+        appendMessage(file ? `📎 [File: ${file.name}]\n${messageText || "Please analyze this document."}` : messageText, "user");
         
         const formData = new FormData();
-        formData.append("message", messageText || "Please analyze this invoice.");
+        formData.append("message", messageText || "Please analyze this document.");
         formData.append("session_id", sessionId);
         if (file) { formData.append("file", file); }
 
@@ -170,7 +174,7 @@
             
             if (data.action === "AWAITING_USER_DECISION") {
                 pendingFieldsToFix = data.missing_fields;
-                currentExtractedData = data.partial_data; // Store the clipboard data
+                currentExtractedData = data.partial_data; 
                 
                 const inputField = document.getElementById("user-input");
                 const scanBtn = document.getElementById("scan-btn");
@@ -180,10 +184,35 @@
                 scanBtn.style.backgroundColor = "#f39c12"; 
             }
             
+            // --- CREATE THE MESSAGE BUBBLE ONCE ---
             const msgDiv = document.createElement("div");
             msgDiv.className = "message bot";
             msgDiv.innerHTML = data.reply.replace(/\n/g, '<br>');
-            chatBox.appendChild(msgDiv);
+            
+            // 🚀 NEW: If the backend sent a certificate, attach the shiny download button!
+            if (data.certificate) {
+                const certBtn = document.createElement("button");
+                certBtn.innerHTML = "📄 View / Print Official Certificate";
+                certBtn.style.marginTop = "15px";
+                certBtn.style.backgroundColor = "#2ecc71"; // Nice green color
+                certBtn.style.width = "100%";
+                
+                // When clicked, open the HTML in a new tab and trigger the print/save dialog
+                certBtn.onclick = function() {
+                    const printWindow = window.open('', '_blank');
+                    printWindow.document.write(data.certificate);
+                    printWindow.document.close();
+                    
+                    // Add a tiny delay to ensure styles load, then trigger the PDF/Print prompt
+                    setTimeout(() => {
+                        printWindow.print();
+                    }, 500);
+                };
+                
+                msgDiv.appendChild(certBtn); // Attach button to the bubble
+            }
+
+            chatBox.appendChild(msgDiv); // Push the bubble to the chat screen
             chatBox.scrollTop = chatBox.scrollHeight;
 
         } catch (error) {

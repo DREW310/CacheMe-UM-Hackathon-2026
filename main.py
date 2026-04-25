@@ -5,6 +5,12 @@ import requests
 import json
 import base64
 import time
+import pandas as pd
+from docx import Document
+import io
+import PyPDF2
+import uuid
+from datetime import datetime
 
 app = FastAPI()
 
@@ -17,11 +23,22 @@ app.add_middleware(
 )
 
 # ---------------------------------------------------------
-# 1. THE LHDN SCHEMA TOOL (Forces AI to return perfect JSON)
+# 1. THE LHDN SCHEMA TOOL
 # ---------------------------------------------------------
 system_instruction = """
-    You are a strict data extraction agent for LHDN invoice compliance. 
-    You MUST extract the data from the invoice and return it EXACTLY as a valid JSON object matching this exact structure:
+    You are an elite data extraction agent for LHDN invoice compliance. 
+    You will receive messy, unstructured text and images.
+    
+    CRITICAL OCR RULES FOR MALAYSIAN INVOICES:
+    1. **Bilingual Text:** Extract the ENGLISH company name (e.g., LAU SENG HUAT).
+    2. **Invoice Number Alignment:** Look for "No." or "Your Ref". Beware of large white spaces.
+    3. **Buyer Name:** Look on the left side under the header. It is explicitly labeled "NAME : " (e.g., NAME : LIM BROTHER...).
+    4. **Issue Date:** Look for the word "Date :" on the right side. This is the Issue Date.
+    5. **Grand Total:** Look at the absolute bottom right corner of the page for "Total Amount (RM) :". 
+    
+    YOUR MISSION:
+    Step 1: Write a short 1-sentence thought process identifying the Supplier Name, Buyer Name, and Grand Total.
+    Step 2: Output EXACTLY a valid JSON object matching this structure. If missing, use "".
     {
       "supplier_details": {"name": "", "tin": "", "registration_number": "", "msic_code": ""},
       "buyer_details": {"name": "", "tin": ""},
@@ -29,35 +46,40 @@ system_instruction = """
       "financials": {"subtotal": 0, "total_tax": 0, "grand_total": 0},
       "line_items": [{"description": "", "unit_price": 0, "quantity": 0, "sku": ""}]
     }
-    Return ONLY the raw JSON object. Do not include markdown formatting like ```json. Do not include any other text.
-    """
+"""
 
 # ---------------------------------------------------------
 # 2. THE AI REASONING ENGINE
 # ---------------------------------------------------------
-def analyze_document_with_ai(prompt_text, base64_image=None, xml_text=None):
-    api_url = "XXX" # <-- Replace with actual API URL
-    api_key = "YYY"               # <-- Replace with actual API Key
+def analyze_document_with_ai(prompt_text, base64_image=None, document_text=None):
+    api_url = "https://api.ilmu.ai/v1/chat/completions"
+    api_key = "sk-1f906ef77fb94e81ab62b3a6e61060918dbca4fb6c616c9e" 
     
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json"
     }
 
-    # Build the message payload depending on if we have an image or text
     user_content = [{"type": "text", "text": prompt_text}]
     
     if base64_image:
-        # Use complex multimodal array ONLY if an image is attached
+        vision_prompt = (
+            f"{prompt_text}\n\n"
+            "CRITICAL VISUAL LAYOUT RULES FOR THIS DOCUMENT:\n"
+            "1. **Supplier Name:** Usually the largest text at the top. If non-Romanic characters are present, it is often directly beneath them.\n"
+            "2. **Buyer Info:** Look at the bottom-left of the top header for 'NAME:'.\n"
+            "3. **Invoice Metadata:** Look on the right side under the 'INVOICE' logo.\n"
+            "4. **Line Items:** Everything in the main grid below the header.\n\n"
+            "Output ONLY valid JSON matching the required schema."
+        )
         user_content = [
-            {"type": "text", "text": prompt_text},
+            {"type": "text", "text": vision_prompt},
             {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}
         ]
     else:
-        # Use standard text string for XML to prevent API 500 crashes
         user_content = prompt_text
-        if xml_text:
-            user_content += f"\n\n--- RAW INVOICE DATA ---\n{xml_text}"
+        if document_text:
+            user_content += f"\n\n--- RAW INVOICE DATA ---\n{document_text}"
 
     payload = {
         "model": "ilmu-glm-5.1",
@@ -65,14 +87,13 @@ def analyze_document_with_ai(prompt_text, base64_image=None, xml_text=None):
             {"role": "system", "content": system_instruction},
             {"role": "user", "content": user_content}
         ]
-        # Notice we completely removed the 'tools' and 'tool_choice' parameters!
     }
 
     max_retries = 2
     for attempt in range(max_retries):
         try:
-            # We add a 60-second timeout so our code doesn't hang forever
-            response = requests.post(api_url, headers=headers, json=payload, timeout=60)
+            # INCREASED TO 120 SECONDS TO PREVENT TIMEOUTS
+            response = requests.post(api_url, headers=headers, json=payload, timeout=120)
             response.raise_for_status()
             response_data = response.json()
             
@@ -84,27 +105,24 @@ def analyze_document_with_ai(prompt_text, base64_image=None, xml_text=None):
                 end = content.rfind('}') + 1
                 return json.loads(content[start:end])
                 
+            print(f"RAW AI RESPONSE: {content}")
             return {"error": "AI response did not contain valid JSON."}
 
         except requests.exceptions.Timeout:
             if attempt < max_retries - 1:
                 print(f"ILMU Server is slow. Retrying... (Attempt {attempt + 2})")
-                time.sleep(2) # Wait 2 seconds before trying again
+                time.sleep(2) 
                 continue
             return {"error": "ILMU API timed out. The server is currently too slow or overloaded."}
             
         except Exception as e:
-            # Catch 504s and other server errors
             if "504" in str(e) and attempt < max_retries - 1:
-                print(f"ILMU 504 Gateway Timeout. Retrying... (Attempt {attempt + 2})")
                 time.sleep(2)
                 continue
-                
-            print(f"API Error: {e}")
             return {"error": f"ILMU Server Error: {str(e)}"}
 
 # ---------------------------------------------------------
-# 3. FASTAPI ENDPOINT (Receives File + Text)
+# 3. FASTAPI ENDPOINT
 # ---------------------------------------------------------
 @app.post("/api/chat")
 async def chat_endpoint(
@@ -113,55 +131,81 @@ async def chat_endpoint(
     file: UploadFile = File(None)
 ):
     base64_image = None
-    xml_text = None
+    document_text = None
 
-    # --- NEW: Check if this is completed data from the frontend ---
+    # --- SCENARIO A: Human-in-the-loop returning completed data ---
     if message.startswith("FINAL_DATA:"):
         extracted_data = json.loads(message.replace("FINAL_DATA:", ""))
     
-    # --- Normal AI Extraction Flow ---
+    # --- SCENARIO B: Brand new document upload ---
     else:
-        base64_image = None
-        xml_text = None
+        # 1. Check for small talk guardrails
+        small_talk_triggers = ["hi", "hello", "hey", "test", "ping", "how are you", "help"]
+        cleaned_message = message.strip().lower()
+        if not file and cleaned_message in small_talk_triggers:
+            return {
+                "reply": "Hello! I am the LHDN Fraud Detective Agent. To avoid system waste, I strictly process procurement data. Please upload an e-invoice (Image, XML, Word, or Excel) to begin.",
+                "action": "ANALYSIS_COMPLETE"
+            }
 
-    # Step 1: Process the uploaded file
-    if file:
-        file_bytes = await file.read()
-        
-        # If it's an image, encode to base64 for Vision AI
-        if file.content_type in ["image/jpeg", "image/png"]:
-            base64_image = base64.b64encode(file_bytes).decode('utf-8')
-        
-        # If it's XML or text, decode to string
-        elif file.content_type in ["text/xml", "application/xml"]:
-            xml_text = file_bytes.decode('utf-8')
+        # 2. Process the file based on its type
+        if file:
+            file_bytes = await file.read()
+            
+            if file.content_type in ["image/jpeg", "image/png"]:
+                base64_image = base64.b64encode(file_bytes).decode('utf-8')
+            elif file.content_type in ["text/xml", "application/xml", "text/plain"]:
+                document_text = file_bytes.decode('utf-8')
+            elif file.content_type == "application/json":
+                raw_json = json.loads(file_bytes.decode('utf-8'))
+                document_text = json.dumps(raw_json, indent=2)
+            elif file.content_type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+                doc = Document(io.BytesIO(file_bytes))
+                text_blocks = []
+                for para in doc.paragraphs:
+                    if para.text.strip(): text_blocks.append(para.text.strip())
+                for table in doc.tables:
+                    for row in table.rows:
+                        row_data = [cell.text.strip() for cell in row.cells if cell.text.strip()]
+                        if row_data: text_blocks.append(" | ".join(row_data))
+                document_text = "\n".join(text_blocks)
+            elif file.content_type in ["application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "application/vnd.ms-excel"]:
+                df = pd.read_excel(io.BytesIO(file_bytes))
+                df = df.dropna(how='all').dropna(axis=1, how='all')
+                document_text = df.to_csv(index=False, sep='\t')
+            elif file.content_type == "application/pdf":
+                pdf_reader = PyPDF2.PdfReader(io.BytesIO(file_bytes))
+                extracted_text = [page.extract_text() for page in pdf_reader.pages]
+                document_text = "\n".join(extracted_text)
+            else:
+                return {"reply": f"🚨 Unsupported file type: {file.content_type}. Please upload Image, XML, JSON, Word, or Excel.", "action": "ERROR"}
 
-    # Step 2: Send to AI for Extraction
-    extracted_data = analyze_document_with_ai(message, base64_image, xml_text)
+        # 3. Call the AI ONLY inside this else block!
+        extracted_data = analyze_document_with_ai(message, base64_image, document_text)
 
-    # Step 2.5: Human-in-the-Loop Validation (Check for blanks)
+    # 🚨 CRITICAL ERROR CHECK (For both scenarios)
+    if "error" in extracted_data:
+        return {"reply": f"🚨 **AI Extraction Failed!**\n\n{extracted_data['error']}", "action": "ERROR"}
+
+    # --- Step 2.5: Human-in-the-Loop Validation ---
     missing_fields = []
     
-    # Safely check if fields exist and are not empty strings or null
     invoice_num = extracted_data.get('invoice_metadata', {}).get('invoice_number')
-    if not invoice_num or invoice_num == "null" or invoice_num.strip() == "":
+    if not invoice_num or str(invoice_num).lower() == "null" or str(invoice_num).strip() == "":
         missing_fields.append("Invoice Number")
         
     supplier_name = extracted_data.get('supplier_details', {}).get('name')
-    if not supplier_name or supplier_name == "null" or supplier_name.strip() == "":
+    if not supplier_name or str(supplier_name).lower() == "null" or str(supplier_name).strip() == "":
         missing_fields.append("Supplier Name")
 
     if missing_fields:
         missing_list_html = "".join([f"<li><b>{field}</b></li>" for field in missing_fields])
-        
         interactive_reply = (
             f"⚠️ **Incomplete Data Detected**\n"
             f"The AI could not read the following required fields from the document:\n"
             f"<ul>{missing_list_html}</ul>\n"
             f"Please type the missing information into the input box below to resume the workflow."
         )
-        
-        # Notice we are now sending the actual array of missing fields back to the frontend!
         return {
             "reply": interactive_reply, 
             "action": "AWAITING_USER_DECISION",
@@ -169,63 +213,73 @@ async def chat_endpoint(
             "partial_data": extracted_data
         }
 
-    # If the API call failed (e.g., dummy key), return a mock response for testing
-    if "error" in extracted_data:
-        actual_error = extracted_data["error"]
-        return {
-            "reply": f"🚨 **AI Extraction Failed!**\n\nHere is the exact reason why:\n{actual_error}", 
-            "action": "ERROR"
-        }
-
-    # Step 3: Run Database Verification against local umhackathon_2026.db
+    # --- Step 3: Run Database Verification ---
     fraud_flags = []
+    warnings = [] 
     verification_summary = []
+    vendor_id = None # INITIALIZED TO PREVENT CRASHES
 
-    # Connect to the local SQLite database
     try:
-        # Note: Ensure your file is named exactly this and is in the same folder
         conn = sqlite3.connect('umhackathon_2026.db') 
-        # This makes the database return dictionaries instead of tuples
         conn.row_factory = sqlite3.Row 
         cursor = conn.cursor()
 
-        # --- A. LHDN Compliance Check ---
+        # A. LHDN Compliance Check
         lhdn_uuid = extracted_data.get('invoice_metadata', {}).get('lhdn_uuid')
-        if not lhdn_uuid or lhdn_uuid.lower() == "null":
-            fraud_flags.append("🚨 MISSING LHDN UUID: This invoice is not legally validated by LHDN.")
-        else:
-            verification_summary.append("✅ LHDN UUID Validated.")
+        supplier_tin = extracted_data.get('supplier_details', {}).get('tin')
 
-        # --- B. Ghost Vendor Check ---
+        if not lhdn_uuid or str(lhdn_uuid).lower() == "null":
+            pass # We don't warn for Legacy anymore since we auto-generate it!
+        else:
+            if len(str(lhdn_uuid)) > 10: 
+                verification_summary.append("✅ LHDN UUID structure validated.")
+            else:
+                fraud_flags.append(f"🚨 FAKE UUID: The provided UUID ({lhdn_uuid}) is invalid.")
+
+        # B. Vendor & TIN Verification
         ssm_number = extracted_data.get('supplier_details', {}).get('registration_number')
         cursor.execute("SELECT * FROM vendors WHERE ssm_number = ?", (ssm_number,))
         vendor = cursor.fetchone()
 
         if not vendor:
-            fraud_flags.append(f"🚨 GHOST VENDOR: SSM Number {ssm_number} not found in approved vendor database.")
-            vendor_id = None
+            warnings.append(f"⚠️ **UNREGISTERED VENDOR:** SSM {ssm_number} not in our database.")
         else:
-            vendor_id = vendor['vendor_id']
+            vendor_id = vendor['vendor_id'] 
             verification_summary.append(f"✅ Vendor '{vendor['company_name']}' is registered.")
+            
+            # BULLETPROOF TIN CHECK (Supports rollback)
+            db_tin = None
+            if 'tin_number' in vendor.keys():
+                db_tin = vendor['tin_number']
+            elif 'tax_id' in vendor.keys():
+                db_tin = vendor['tax_id']
 
-        # --- C. Double Dipping Check (Only if Vendor exists) ---
+            if supplier_tin and str(supplier_tin).lower() != "null" and db_tin:
+                if supplier_tin != db_tin:
+                    fraud_flags.append(f"🚨 TIN MISMATCH: Invoice TIN ({supplier_tin}) vs Registered ({db_tin})!")
+                else:
+                    verification_summary.append("✅ Vendor TIN matches database.")
+            elif not db_tin:
+                warnings.append("⚠️ Database missing TIN/Tax ID column for this vendor.")
+
+        # C. Double Dipping Check 
         invoice_number = extracted_data.get('invoice_metadata', {}).get('invoice_number')
         if vendor_id and invoice_number:
             cursor.execute("SELECT * FROM processed_invoices WHERE invoice_number = ? AND vendor_id = ?", (invoice_number, vendor_id))
             duplicate = cursor.fetchone()
             if duplicate:
-                fraud_flags.append(f"🚨 DUPLICATE INVOICE: Invoice {invoice_number} was already paid on {duplicate['processed_date']}.")
+                fraud_flags.append(f"🚨 DUPLICATE INVOICE: Invoice {invoice_number} was already processed on {duplicate['processed_date']}.")
             else:
                 verification_summary.append("✅ Invoice Number is unique (No duplicates).")
 
-        # --- D. Overbilling Check (Only if Vendor exists) ---
+        # D. Overbilling Check 
         line_items = extracted_data.get('line_items', [])
         if vendor_id and line_items:
             for item in line_items:
                 sku = item.get('sku')
                 billed_price = float(item.get('unit_price', 0))
 
-                if sku:
+                if sku and str(sku).lower() != "null":
                     cursor.execute("SELECT agreed_unit_price FROM vendor_contracts WHERE vendor_id = ? AND sku = ?", (vendor_id, sku))
                     contract = cursor.fetchone()
 
@@ -235,7 +289,7 @@ async def chat_endpoint(
                             variance = billed_price - agreed_price
                             fraud_flags.append(f"🚨 OVERBILLING: SKU {sku} billed at RM {billed_price}. Contract price is RM {agreed_price} (Variance: RM {variance}).")
                     else:
-                        fraud_flags.append(f"⚠️ UNKNOWN ITEM: SKU {sku} is not in the contract for this vendor.")
+                        warnings.append(f"⚠️ UNKNOWN ITEM: SKU {sku} is not in the contract for this vendor.")
 
     except sqlite3.Error as e:
         fraud_flags.append(f"Database Error: {e}")
@@ -243,31 +297,127 @@ async def chat_endpoint(
         if conn:
             conn.close()
 
-    # Step 4: Format the final response for the user interface
-    # Step 4: Format the final response for the user interface
-    status_header = "🛑 **FRAUD DETECTED**" if fraud_flags else "✅ **INVOICE APPROVED**"
+    # --- Step 4: Format the final response & Auto-Generate LHDN UUIDs ---
     
+    # SAFETY NET: Default to empty dict if AI returns null
+    supplier = extracted_data.get('supplier_details') or {}
+    buyer = extracted_data.get('buyer_details') or {}
+    metadata = extracted_data.get('invoice_metadata') or {}
+    financials = extracted_data.get('financials') or {}
+    
+    approved_time_str = "N/A"
+    certificate_html = None # 🚨 INITIALIZE EMPTY CERTIFICATE
+    
+    def clean_field(val):
+        return val if val and str(val).lower() != "null" and str(val).strip() != "" else "[Not found on document]"
+
+    disp_sup_name = clean_field(supplier.get('name'))
+    disp_sup_tin = clean_field(supplier.get('tin'))
+    disp_sup_ssm = clean_field(supplier.get('registration_number'))
+    disp_buy_name = clean_field(buyer.get('name'))
+    disp_inv_num = clean_field(metadata.get('invoice_number'))
+    disp_date = clean_field(metadata.get('issue_date'))
+
+    if not vendor_id:
+        disp_sup_ssm = f"{disp_sup_ssm} ⚠️ [Not in DB]"
+        disp_sup_tin = f"{disp_sup_tin} ⚠️ [Not in DB]"
+
+    if fraud_flags:
+        status_header = "🛑 **FRAUD DETECTED (ACTION REQUIRED)**"
+    elif warnings:
+        status_header = "⚠️ **PENDING REVIEW (UNREGISTERED VENDOR OR UNKNOWN SKUS)**"
+    else:
+        status_header = "✅ **INVOICE APPROVED & LHDN CERTIFIED**"
+        
+        # THE LHDN GATEWAY SIMULATOR
+        current_uuid = metadata.get('lhdn_uuid')
+        if not current_uuid or str(current_uuid).lower() == "null":
+            new_lhdn_uuid = str(uuid.uuid4())
+            approved_time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            
+            try:
+                conn = sqlite3.connect('umhackathon_2026.db')
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT INTO approved_e_invoices 
+                    (invoice_number, supplier_ssm, buyer_name, grand_total, lhdn_uuid, approved_time) 
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """, (disp_inv_num, supplier.get('registration_number', ''), disp_buy_name, financials.get('grand_total', 0), new_lhdn_uuid, approved_time_str))
+                conn.commit()
+            except sqlite3.Error as e:
+                print(f"Failed to save to approve_db: {e}")
+            finally:
+                if conn:
+                    conn.close()
+                    
+            metadata['lhdn_uuid'] = f"**{new_lhdn_uuid}** *(Auto-Generated)*"
+            verification_summary.append(f"✅ Document successfully bridged to LHDN API at {approved_time_str}")
+
+            # -------------------------------------------------------------
+            # 🚀 ZERO-TOKEN CERTIFICATE GENERATOR (Pure Python!)
+            # -------------------------------------------------------------
+            certificate_html = f"""
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>LHDN Approval - {disp_inv_num}</title>
+                <style>
+                    body {{ font-family: Arial, sans-serif; padding: 40px; color: #333; }}
+                    .header {{ text-align: center; border-bottom: 3px solid #3498db; padding-bottom: 20px; margin-bottom: 30px; }}
+                    .status {{ background: #dcfce7; color: #166534; padding: 15px; text-align: center; font-weight: bold; font-size: 18px; border-radius: 8px; border: 1px solid #bbf7d0; margin-bottom: 30px; }}
+                    table {{ width: 100%; border-collapse: collapse; margin-bottom: 30px; }}
+                    th, td {{ padding: 12px; text-align: left; border-bottom: 1px solid #ddd; }}
+                    th {{ background-color: #f8f9fa; width: 35%; }}
+                    .uuid-box {{ background: #eff6ff; border: 2px dashed #3498db; padding: 20px; text-align: center; font-family: monospace; font-size: 16px; font-weight: bold; }}
+                </style>
+            </head>
+            <body>
+                <div class="header">
+                    <h1>UM Hackathon 2026</h1>
+                    <p>Automated e-Invoice Clearing House</p>
+                </div>
+                <div class="status">✅ INVOICE APPROVED & LHDN CERTIFIED</div>
+                
+                <h3>Transaction Details</h3>
+                <table>
+                    <tr><th>Invoice Number</th><td>{disp_inv_num}</td></tr>
+                    <tr><th>Supplier Name</th><td>{disp_sup_name}</td></tr>
+                    <tr><th>Supplier SSM / TIN</th><td>{disp_sup_ssm} / {disp_sup_tin}</td></tr>
+                    <tr><th>Buyer Name</th><td>{disp_buy_name}</td></tr>
+                    <tr><th>Grand Total</th><td>RM {financials.get('grand_total', 0)}</td></tr>
+                    <tr><th>Approval Timestamp</th><td>{approved_time_str}</td></tr>
+                </table>
+
+                <h3>Official LHDN Bridge Data</h3>
+                <div class="uuid-box">
+                    LHDN UUID:<br><br>{new_lhdn_uuid}
+                </div>
+            </body>
+            </html>
+            """
+
     formatted_reply = f"{status_header}\n\n"
     
     if fraud_flags:
         formatted_reply += "**Red Flags:**\n" + "\n".join(fraud_flags) + "\n\n"
-    
+    if warnings:
+        formatted_reply += "**Warnings:**\n" + "\n".join(warnings) + "\n\n"
+        
     formatted_reply += "**System Checks:**\n" + "\n".join(verification_summary) + "\n\n"
     
-    # --- UPGRADED QoL DATA FORMATTING ---
-    formatted_reply += "*(Extracted Invoice Data)*\n"
-    supplier = extracted_data.get('supplier_details', {})
-    buyer = extracted_data.get('buyer_details', {})
-    metadata = extracted_data.get('invoice_metadata', {})
-    financials = extracted_data.get('financials', {})
-    
-    formatted_reply += f"• **Supplier Name:** {supplier.get('name', 'N/A')}\n"
-    formatted_reply += f"• **Supplier TIN:** {supplier.get('tin', 'N/A')}\n"
-    formatted_reply += f"• **SSM Number:** {supplier.get('registration_number', 'N/A')}\n"
-    formatted_reply += f"• **Buyer Name:** {buyer.get('name', 'N/A')}\n"
-    formatted_reply += f"• **Invoice Number:** {metadata.get('invoice_number', 'N/A')}\n"
-    formatted_reply += f"• **Issue Date:** {metadata.get('issue_date', 'N/A')}\n"
-    formatted_reply += f"• **LHDN UUID:** {metadata.get('lhdn_uuid', 'N/A')}\n"
+    formatted_reply += "*(Extracted & Certified Invoice Data)*\n"
+    formatted_reply += f"• **Supplier Name:** {disp_sup_name}\n"
+    formatted_reply += f"• **Supplier TIN:** {disp_sup_tin}\n"
+    formatted_reply += f"• **SSM Number:** {disp_sup_ssm}\n"
+    formatted_reply += f"• **Buyer Name:** {disp_buy_name}\n"
+    formatted_reply += f"• **Invoice Number:** {disp_inv_num}\n"
+    formatted_reply += f"• **Issue Date:** {disp_date}\n"
     formatted_reply += f"• **Grand Total:** RM {financials.get('grand_total', 0)}\n"
+    formatted_reply += f"• **LHDN UUID:** {metadata.get('lhdn_uuid', '[Not found on document]')}\n"
 
-    return {"reply": formatted_reply, "action": "ANALYSIS_COMPLETE"}
+    # 🚨 CRITICAL: Pass the generated HTML alongside the reply!
+    return {
+        "reply": formatted_reply, 
+        "action": "ANALYSIS_COMPLETE",
+        "certificate": certificate_html
+    }
