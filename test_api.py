@@ -1,8 +1,8 @@
 import requests
 
 # Your team's ILMU key
-api_key = "XXX" 
-url = "YYY"
+api_key = "sk-1f906ef77fb94e81ab62b3a6e61060918dbca4fb6c616c9e" 
+url = "https://api.ilmu.ai/v1/chat/completions"
 
 headers = {
     "Authorization": f"Bearer {api_key}",

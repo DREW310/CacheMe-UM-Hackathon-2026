@@ -3,57 +3,379 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Fraud Detection Copilot</title>
+    <title>Z.AI - Fraud Detection OS</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f7f6; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
-        .chat-container { width: 500px; background: white; border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.1); display: flex; flex-direction: column; overflow: hidden; }
-        .chat-header { background: #2c3e50; color: white; padding: 16px; text-align: center; font-weight: bold; }
-        .chat-box { height: 450px; padding: 16px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; background: #fafafa; }
-        .message { max-width: 85%; padding: 10px 14px; border-radius: 8px; font-size: 14px; line-height: 1.4; word-wrap: break-word; }
-        .message.user { background: #3498db; color: white; align-self: flex-end; border-bottom-right-radius: 0; }
-        .message.bot { background: #e9ecef; color: #333; align-self: flex-start; border-bottom-left-radius: 0; white-space: pre-wrap; }
-        .input-area { display: flex; flex-direction: column; padding: 12px; background: white; border-top: 1px solid #ddd; }
-        .file-info { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
-        .file-label { font-size: 12px; color: #666; }
-        .remove-file { display: none; font-size: 12px; color: #e74c3c; cursor: pointer; font-weight: bold; background: none; border: none; padding: 0; }
-        .remove-file:hover { text-decoration: underline; }
-        .input-row { display: flex; width: 100%; gap: 8px; }
-        input[type="text"] { flex: 1; padding: 10px; border: 1px solid #ccc; border-radius: 6px; outline: none; }
-        button { background: #3498db; color: white; border: none; padding: 10px 16px; border-radius: 6px; cursor: pointer; font-weight: bold; transition: background 0.2s; }
-        button:hover { background: #2980b9; }
-        .mic-btn { background: #e67e22; padding: 10px 12px; }
-        .mic-btn:hover { background: #d35400; }
-        .mic-btn.recording { background: #e74c3c; animation: pulse 1s infinite; }
-        @keyframes pulse { 0% { transform: scale(1); } 50% { transform: scale(1.05); } 100% { transform: scale(1); } }
+        /* Base Enterprise Reset */
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; display: flex; height: 100vh; background-color: #f8fafc; color: #333; }
+        * { box-sizing: border-box; }
+
+        /* Sidebar Navigation */
+        .sidebar { width: 260px; background: #0f172a; color: #94a3b8; display: flex; flex-direction: column; }
+        .sidebar-header { padding: 25px 20px; font-size: 22px; font-weight: bold; color: white; border-bottom: 1px solid #1e293b; letter-spacing: 1px; display: flex; align-items: center; gap: 10px; }
+        .nav-menu { list-style: none; padding: 0; margin: 20px 0; display: flex; flex-direction: column; gap: 5px; }
+        .nav-item { padding: 15px 25px; cursor: pointer; font-size: 15px; font-weight: 500; transition: all 0.2s; display: flex; align-items: center; gap: 12px; }
+        .nav-item:hover { background: #1e293b; color: white; }
+        .nav-item.active { background: #1e293b; color: white; border-left: 4px solid #3b82f6; }
+        .agent-badge { margin-top: auto; padding: 20px; background: #1e293b; margin: 20px; border-radius: 8px; font-size: 13px; text-align: center; border: 1px solid #334155;}
+        
+        /* Main Content Area */
+        .main-content { flex: 1; display: flex; flex-direction: column; overflow: hidden; background: #f8fafc;}
+        .topbar { background: white; padding: 20px 30px; font-size: 20px; font-weight: 600; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between; }
+        .view-section { flex: 1; padding: 30px; overflow-y: auto; display: none; }
+        .view-section.active { display: block; }
+
+        /* Dashboard Cards */
+        .dashboard-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin-bottom: 30px; }
+        .stat-card { background: white; padding: 25px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.02); border: 1px solid #e2e8f0; }
+        .stat-card.primary { background: #3b82f6; color: white; border: none; }
+        .stat-title { font-size: 13px; text-transform: uppercase; font-weight: 600; margin-bottom: 10px; opacity: 0.8; }
+        .stat-value { font-size: 32px; font-weight: bold; margin: 0; }
+        .stat-sub { font-size: 13px; margin-top: 8px; opacity: 0.9;}
+
+        /* Chatbot UI overrides to fit new layout */
+        .chat-container { width: 100%; max-width: 900px; margin: 0 auto; background: white; border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.05); display: flex; flex-direction: column; height: 100%; border: 1px solid #e2e8f0; }
+        .chat-box { flex: 1; padding: 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 15px; background: #f8fafc; }
+        .message { max-width: 80%; padding: 14px 18px; border-radius: 8px; font-size: 14px; line-height: 1.5; word-wrap: break-word; }
+        .message.user { background: #3b82f6; color: white; align-self: flex-end; border-bottom-right-radius: 0; }
+        .message.bot { background: white; color: #333; align-self: flex-start; border-bottom-left-radius: 0; border: 1px solid #e2e8f0; box-shadow: 0 2px 4px rgba(0,0,0,0.02); }
+        .input-area { display: flex; flex-direction: column; padding: 15px 20px; background: white; border-top: 1px solid #e2e8f0; border-radius: 0 0 12px 12px; }
+        .file-info { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+        .file-label { font-size: 13px; color: #64748b; font-weight: 500;}
+        .remove-file { display: none; font-size: 12px; color: #ef4444; cursor: pointer; font-weight: bold; background: none; border: none; padding: 0; }
+        .input-row { display: flex; width: 100%; gap: 10px; }
+        input[type="text"] { flex: 1; padding: 12px 15px; border: 1px solid #cbd5e1; border-radius: 8px; outline: none; font-size: 14px; transition: border 0.2s;}
+        input[type="text"]:focus { border-color: #3b82f6; }
+        button { background: #3b82f6; color: white; border: none; padding: 12px 20px; border-radius: 8px; cursor: pointer; font-weight: bold; transition: background 0.2s; }
+        button:hover { background: #2563eb; }
+        .btn-secondary { background: #64748b; }
+        .btn-secondary:hover { background: #475569; }
+        
+        .placeholder-view { display: flex; justify-content: center; align-items: center; height: 100%; color: #94a3b8; font-size: 18px; text-align: center; }
+
+        /* Audit Table Styles */
+        .audit-container { background: white; border-radius: 10px; border: 1px solid #e2e8f0; overflow: hidden; }
+        .audit-table { width: 100%; border-collapse: collapse; text-align: left; font-size: 14px; }
+        .audit-table th { background: #f8fafc; padding: 16px 20px; font-weight: 600; color: #64748b; border-bottom: 2px solid #e2e8f0; }
+        .audit-table td { padding: 16px 20px; border-bottom: 1px solid #e2e8f0; vertical-align: middle; }
+        .audit-table tr:hover { background: #f1f5f9; }
+        .audit-table tr.flagged-row { background: #fef2f2; } /* Light red for fraud */
+        
+        /* Status Badges */
+        .badge { padding: 6px 12px; border-radius: 20px; font-size: 12px; font-weight: 600; display: inline-flex; align-items: center; gap: 6px; }
+        .badge-verified { background: #dcfce7; color: #166534; border: 1px solid #bbf7d0; }
+        .badge-flagged { background: #fee2e2; color: #991b1b; border: 1px solid #fecaca; }
+        .badge-pending { background: #fef3c7; color: #92400e; border: 1px solid #fde68a; }
     </style>
 </head>
 <body>
 
-<div class="chat-container">
-    <div class="chat-header">LHDN Fraud Detective Agent</div>
-    <div class="chat-box" id="chat-box">
-        <div class="message bot">Upload an e-invoice (Image, XML, JSON, PDF, Word, or Excel) to verify it against the LHDN schema and our corporate database. You can also use the microphone to add verbal instructions!</div>
+<aside class="sidebar">
+    <div class="sidebar-header">
+        Z.AI Automated e-Invoice Clearing House
     </div>
-    <div class="input-area">
-        <div class="file-info">
-            <div class="file-label" id="file-name-display">No file selected</div>
-            <button class="remove-file" id="remove-file-btn" onclick="clearFile()">❌ Remove</button>
+    <ul class="nav-menu">
+        <li class="nav-item active" onclick="switchView('dashboard', this)">📊 Dashboard</li>
+        <li class="nav-item" onclick="switchView('chatbot', this)">🤖 Agentic Chatbot</li>
+        <li class="nav-item" onclick="switchView('invoices', this)">📄 Invoices Ledger</li>
+        <li class="nav-item" onclick="switchView('audit', this)">🛡️ Audit & Verification</li>
+        <li class="nav-item" onclick="switchView('tokens', this)">🪙 Token Control</li>
+    </ul>
+    
+    <div class="agent-badge">
+        ✨ <b>LHDN Detective Active</b><br>System Status: Online
+    </div>
+</aside>
+
+<main class="main-content">
+    <div class="topbar" id="topbar-title">Overview Dashboard</div>
+
+    <div id="view-dashboard" class="view-section active">
+        <div class="dashboard-grid">
+            <div class="stat-card primary">
+                <div class="stat-title">Total Processed Value</div>
+                <div class="stat-value" id="dash-b2b-val">Loading...</div>
+                <div class="stat-sub">Across <span id="dash-b2b-count">0</span> B2B Invoices</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-title" style="color: #e67e22;">Pending B2C Retail</div>
+                <div class="stat-value" id="dash-ret-val" style="color: #333;">Loading...</div>
+                <div class="stat-sub"><span id="dash-ret-count">0</span> Receipts Awaiting Consolidation</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-title" style="color: #10b981;">Active Registered Vendors</div>
+                <div class="stat-value" id="dash-vendors" style="color: #333;">-</div>
+                <div class="stat-sub">Verified against LHDN Schema</div>
+            </div>
         </div>
-        <div class="input-row">
-            <input type="file" id="file-upload" accept=".png, .jpg, .jpeg, .xml, .json, .docx, .xlsx, .pdf" style="display: none;" onchange="updateFileName()">
-            <button onclick="document.getElementById('file-upload').click()" style="background: #7f8c8d;">📎</button>
-            <button class="mic-btn" id="mic-btn" onclick="toggleDictation()" title="Click to speak">🎤</button>
-            
-            <input type="text" id="user-input" placeholder="Type or speak instructions..." onkeypress="handleKeyPress(event)">
-            <button id="scan-btn" onclick="sendMessage()">Scan</button>
+        
+        <div style="background: white; padding: 20px; border-radius: 10px; border: 1px solid #e2e8f0; margin-top: 20px;">
+            <h3 style="margin-top: 0; font-size: 15px; color: #333;">Processing Volume Trend (Last 7 Days)</h3>
+            <div style="position: relative; height: 300px; width: 100%;">
+                <canvas id="mainDashboardChart"></canvas>
+            </div>
         </div>
     </div>
-</div>
+
+    <div id="view-chatbot" class="view-section">
+        <div class="chat-container">
+            <div class="chat-box" id="chat-box">
+                <div class="message bot"><b>Welcome to the Detective Agent!</b><br>Upload an e-invoice (Image, XML, JSON, PDF, Word, or Excel) to verify it against the LHDN schema.</div>
+            </div>
+            <div class="input-area">
+                <div class="file-info">
+                    <div class="file-label" id="file-name-display">No file selected</div>
+                    <button class="remove-file" id="remove-file-btn" onclick="clearFile()">❌ Remove</button>
+                </div>
+                <div class="input-row">
+                    <input type="file" id="file-upload" accept=".png, .jpg, .jpeg, .xml, .json, .docx, .xlsx, .pdf" style="display: none;" onchange="updateFileName()">
+                    <button class="btn-secondary" onclick="document.getElementById('file-upload').click()" title="Attach File">📎</button>
+                    <button class="btn-secondary" id="voice-toggle-btn" onclick="toggleAIVoice()" title="Toggle AI Voice" style="background: #94a3b8;">🔈</button>
+                    <button class="btn-secondary" id="mic-btn" onclick="startVoiceInput()" title="Dictate Message" style="background: #94a3b8;">🎤</button>
+                    
+                    <input type="text" id="user-input" placeholder="Type instructions or CONSOLIDATE..." onkeypress="handleKeyPress(event)">
+                    <button id="scan-btn" onclick="sendMessage()">Scan</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="view-invoices" class="view-section">
+        <h2 style="margin-top:0; color:#0f172a;">Official LHDN Ledger</h2>
+        <p style="color:#64748b; margin-bottom: 20px;">All successfully certified and bridged B2B and Consolidated invoices.</p>
+        
+        <div class="audit-container">
+            <table class="audit-table">
+                <thead>
+                    <tr>
+                        <th>Invoice Number</th>
+                        <th>Buyer Name</th>
+                        <th>Total (RM)</th>
+                        <th>LHDN Status</th>
+                        <th>Date Certified</th>
+                    </tr>
+                </thead>
+                <tbody id="ledger-table-body">
+                    <tr><td colspan="5" style="text-align:center; color:#94a3b8;">Loading ledger...</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+    <div id="view-audit" class="view-section">
+        <h2 style="margin-top:0; color:#0f172a;">Validation Table</h2>
+        <p style="color:#64748b; margin-bottom: 20px;">Recently processed invoices and fraud flags</p>
+        
+        <div class="audit-container">
+            <table class="audit-table">
+                <thead>
+                    <tr>
+                        <th>Invoice ID</th>
+                        <th>Vendor Name</th>
+                        <th>Compliance Status</th>
+                        <th>Issues Detected</th>
+                        <th>Date Processed</th>
+                    </tr>
+                </thead>
+                <tbody id="audit-table-body">
+                    <tr><td colspan="5" style="text-align:center; color:#94a3b8;">Loading audit logs...</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+    <div id="view-tokens" class="view-section">
+        <h2 style="margin-top:0; color:#0f172a;">API Token & Cost Management</h2>
+        <p style="color:#64748b; margin-bottom: 20px;">Monitor Z.AI token consumption and manage API endpoints.</p>
+
+        <div class="dashboard-grid">
+            <div class="stat-card" style="border-left: 4px solid #10b981;">
+                <div class="stat-title">Remaining Quota</div>
+                <div class="stat-value" id="token-remaining">Loading...</div>
+                <div class="stat-sub">Out of <span id="token-limit">0</span> API Credits</div>
+                <div style="width: 100%; background: #e2e8f0; height: 8px; border-radius: 4px; margin-top: 15px; overflow: hidden;">
+                    <div id="quota-bar" style="width: 0%; background: #10b981; height: 100%; transition: width 1s;"></div>
+                </div>
+            </div>
+
+            <div class="stat-card" style="border-left: 4px solid #f59e0b;">
+                <div class="stat-title">Estimated Cost (MTD)</div>
+                <div class="stat-value" id="token-cost">RM 0.00</div>
+                <div class="stat-sub">Based on RM 0.05 per 1k Tokens</div>
+            </div>
+
+            <div class="stat-card" style="border-left: 4px solid #3b82f6;">
+                <div class="stat-title">Active LLM Endpoint</div>
+                <div style="font-size: 16px; font-weight: bold; margin-top: 5px; color: #333;">ilmu-glm-5.1</div>
+                <div class="stat-sub" style="font-family: monospace; margin-top: 10px; background: #f1f5f9; padding: 5px; border-radius: 4px;">sk-1f...fb6</div>
+            </div>
+        </div>
+
+        <div style="background: white; padding: 20px; border-radius: 10px; border: 1px solid #e2e8f0; margin-top: 20px;">
+            <h3 style="margin-top: 0; font-size: 15px; color: #333;">Token Consumption Trend (Last 7 Days)</h3>
+            <div style="position: relative; height: 300px; width: 100%;">
+                <canvas id="usageChart"></canvas>
+            </div>
+        </div>
+    </div>
+
+</main>
 
 <script>
     const sessionId = Math.random().toString(36).substring(7);
 
-    // --- File Handling & Voice ---
+    // --- NAVIGATION LOGIC ---
+    function switchView(viewName, element) {
+        // Update Sidebar highlighting
+        document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+        element.classList.add('active');
+
+        // Update Topbar Title
+        document.getElementById('topbar-title').innerText = element.innerText.replace(/[^a-zA-Z &]/g, '').trim();
+
+        // Hide all sections, show target
+        document.querySelectorAll('.view-section').forEach(el => el.classList.remove('active'));
+        document.getElementById('view-' + viewName).classList.add('active');
+
+        // If Dashboard is clicked, fetch latest data!
+        if (viewName === 'dashboard') {
+            fetchDashboardStats();
+        }
+        if (viewName === 'audit') fetchAuditLogs();
+        if (viewName === 'invoices') fetchInvoicesLedger();
+        if (viewName === 'tokens') fetchTokenData();
+    }
+
+    // --- DASHBOARD API LOGIC ---
+    let mainChartInstance = null; // Store the chart instance
+
+    async function fetchDashboardStats() {
+        try {
+            const response = await fetch("http://localhost:8000/api/dashboard");
+            const data = await response.json();
+            const formatter = new Intl.NumberFormat('en-MY', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            
+            document.getElementById("dash-b2b-val").innerText = "RM " + formatter.format(data.b2b_value);
+            document.getElementById("dash-b2b-count").innerText = data.b2b_count;
+            document.getElementById("dash-ret-val").innerText = "RM " + formatter.format(data.retail_value);
+            document.getElementById("dash-ret-count").innerText = data.retail_count;
+            document.getElementById("dash-vendors").innerText = data.active_vendors;
+
+            // 🚀 DRAW THE MAIN DASHBOARD CHART
+            const ctx = document.getElementById('mainDashboardChart').getContext('2d');
+            if (mainChartInstance) mainChartInstance.destroy(); 
+            
+            mainChartInstance = new Chart(ctx, {
+                type: 'bar', // Using a bar chart for processing volume
+                data: {
+                    labels: data.chart_labels,
+                    datasets: [{
+                        label: 'Processed Value (RM)',
+                        data: data.chart_data,
+                        backgroundColor: '#3b82f6', // Corporate Blue
+                        borderRadius: 4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        y: { beginAtZero: true, grid: { borderDash: [5, 5] } },
+                        x: { grid: { display: false } }
+                    }
+                }
+            });
+
+        } catch (error) {
+            console.error("Dashboard fetch error:", error);
+        }
+    }
+
+    async function fetchAuditLogs() {
+        try {
+            const response = await fetch("http://localhost:8000/api/audit");
+            const logs = await response.json();
+            
+            const tbody = document.getElementById("audit-table-body");
+            tbody.innerHTML = ""; // Clear loading message
+            
+            if (logs.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;">No invoices processed yet.</td></tr>`;
+                return;
+            }
+
+            logs.forEach(log => {
+                // Determine Badge Style
+                let badgeHTML = "";
+                let rowClass = "";
+                
+                if (log.status === "Verified") {
+                    badgeHTML = `<span class="badge badge-verified">✔️ Verified</span>`;
+                } else if (log.status.includes("Flagged")) {
+                    badgeHTML = `<span class="badge badge-flagged">❗ Flagged: Fraud</span>`;
+                    rowClass = "flagged-row"; // Makes the whole row light red
+                } else {
+                    badgeHTML = `<span class="badge badge-pending">⏳ ${log.status}</span>`;
+                }
+
+                // Truncate long issues for a cleaner table
+                let issueText = log.issues_detected.length > 50 ? log.issues_detected.substring(0, 50) + "..." : log.issues_detected;
+                if (issueText === "None") issueText = '<span style="color:#94a3b8;">No irregularities</span>';
+
+                // Inject Row
+                const row = document.createElement("tr");
+                row.className = rowClass;
+                row.innerHTML = `
+                    <td style="font-weight:600;">#${log.invoice_number}</td>
+                    <td>${log.vendor_name}</td>
+                    <td>${badgeHTML}</td>
+                    <td style="font-size:13px;">${issueText}</td>
+                    <td style="color:#64748b; font-size:13px;">${log.processed_at}</td>
+                `;
+                tbody.appendChild(row);
+            });
+        } catch (error) {
+            console.error("Audit fetch error:", error);
+            document.getElementById("audit-table-body").innerHTML = `<tr><td colspan="5" style="text-align:center; color:red;">Failed to load audit logs.</td></tr>`;
+        }
+    }
+
+    // --- INVOICES LEDGER API LOGIC ---
+    async function fetchInvoicesLedger() {
+        try {
+            const response = await fetch("http://localhost:8000/api/invoices");
+            const invoices = await response.json();
+            
+            const tbody = document.getElementById("ledger-table-body");
+            tbody.innerHTML = ""; 
+            
+            if (invoices.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;">No certified invoices yet.</td></tr>`;
+                return;
+            }
+
+            const formatter = new Intl.NumberFormat('en-MY', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+            invoices.forEach(inv => {
+                const row = document.createElement("tr");
+                row.innerHTML = `
+                    <td style="font-weight:600; color:#3b82f6;">#${inv.invoice_number}</td>
+                    <td>${inv.buyer_name}</td>
+                    <td style="font-weight:bold;">RM ${formatter.format(inv.grand_total)}</td>
+                    <td><span class="badge badge-verified">✅ LHDN Certified</span></td>
+                    <td style="color:#64748b; font-size:13px;">${inv.approved_time}</td>
+                `;
+                tbody.appendChild(row);
+            });
+        } catch (error) {
+            console.error("Ledger fetch error:", error);
+            document.getElementById("ledger-table-body").innerHTML = `<tr><td colspan="5" style="text-align:center; color:red;">Failed to load ledger.</td></tr>`;
+        }
+    }
+
+    // Fetch dashboard stats on initial load
+    window.onload = fetchDashboardStats;
+
+    // --- CHATBOT & FILE HANDLING LOGIC ---
     function updateFileName() {
         const fileInput = document.getElementById('file-upload');
         const display = document.getElementById('file-name-display');
@@ -72,36 +394,77 @@
         updateFileName();
     }
 
-    let recognition;
-    if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
-        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-        recognition = new SpeechRecognition();
-        recognition.continuous = false;
-        recognition.interimResults = false;
-        recognition.lang = 'en-US'; 
-        recognition.onresult = function(e) {
-            const transcript = e.results[0][0].transcript;
-            const inputField = document.getElementById('user-input');
-            inputField.value = inputField.value ? inputField.value + " " + transcript : transcript;
-            stopDictationUI();
-        };
-        recognition.onerror = stopDictationUI;
-        recognition.onend = stopDictationUI;
-    }
-
-    function toggleDictation() {
-        const micBtn = document.getElementById('mic-btn');
-        if (!recognition) return alert("Voice not supported.");
-        if (micBtn.classList.contains('recording')) { recognition.stop(); stopDictationUI(); } 
-        else { micBtn.classList.add('recording'); recognition.start(); }
-    }
-    function stopDictationUI() { document.getElementById('mic-btn').classList.remove('recording'); }
-
-    // --- Agentic State Management ---
     let pendingFieldsToFix = []; 
     let currentExtractedData = null; 
 
-    // --- Chat Logic ---
+    // --- AI VOICE (TTS) LOGIC ---
+    let aiVoiceEnabled = false;
+
+    function toggleAIVoice() {
+        aiVoiceEnabled = !aiVoiceEnabled;
+        const btn = document.getElementById('voice-toggle-btn');
+        if (aiVoiceEnabled) {
+            btn.innerText = "🔊";
+            btn.style.background = "#10b981"; // Green when active
+        } else {
+            btn.innerText = "🔈";
+            btn.style.background = "#94a3b8"; // Gray when disabled
+            window.speechSynthesis.cancel(); // Stop talking if turned off
+        }
+    }
+
+    function speakAIResponse(text) {
+        if (!aiVoiceEnabled) return;
+        
+        // Clean the text so the AI doesn't read markdown symbols out loud
+        let cleanText = text.replace(/<[^>]*>?/gm, '') // Remove HTML
+                            .replace(/\*/g, '')        // Remove Bold asterisks
+                            .replace(/⚠️|✅|🛑|🛒/g, '') // Remove emojis
+                            .replace(/System Checks:|Extracted & Certified Invoice Data|Red Flags:|Warnings:/gi, '');
+        
+        const utterance = new SpeechSynthesisUtterance(cleanText);
+        utterance.rate = 1.0; // Normal speed
+        utterance.pitch = 1.0;
+        window.speechSynthesis.speak(utterance);
+    }
+
+    // --- SPEECH-TO-TEXT (VOICE INPUT) LOGIC ---
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    let recognition;
+
+    if (SpeechRecognition) {
+        recognition = new SpeechRecognition();
+        recognition.continuous = false; // Stop listening when the user stops talking
+        recognition.lang = 'en-US'; // You can change to 'en-MY' or 'ms-MY' if preferred!
+
+        recognition.onresult = function(event) {
+            const transcript = event.results[0][0].transcript;
+            const inputField = document.getElementById("user-input");
+            
+            // Append the dictated text to whatever is already in the box
+            if (inputField.value.trim() === "") {
+                inputField.value = transcript;
+            } else {
+                inputField.value += " " + transcript;
+            }
+        };
+
+        recognition.onend = function() {
+            // Turn the button back to gray when it stops listening
+            document.getElementById("mic-btn").style.background = "#94a3b8"; 
+        };
+    }
+
+    function startVoiceInput() {
+        if (!recognition) {
+            alert("Voice input is not supported in this browser. Please use Chrome or Edge.");
+            return;
+        }
+        const micBtn = document.getElementById("mic-btn");
+        micBtn.style.background = "#ef4444"; // Turn red to show it is recording!
+        recognition.start();
+    }
+
     async function sendMessage() {
         const inputField = document.getElementById("user-input");
         const fileInput = document.getElementById("file-upload");
@@ -109,35 +472,30 @@
         const messageText = inputField.value.trim();
         const file = fileInput.files[0];
 
-        // --- SCENARIO A: User is fixing missing fields ---
+        // SCENARIO A: Fixing missing fields
         if (pendingFieldsToFix.length > 0) {
             if (!messageText) return;
-            
             appendMessage(`Providing: ${messageText}`, "user");
             
             let fieldName = pendingFieldsToFix[0];
-            
-            // 🚨 THE SAFETY NET: Create folders if AI failed to make them
             if (!currentExtractedData.invoice_metadata) currentExtractedData.invoice_metadata = {};
             if (!currentExtractedData.supplier_details) currentExtractedData.supplier_details = {};
             
             if (fieldName === "Invoice Number") currentExtractedData.invoice_metadata.invoice_number = messageText;
             if (fieldName === "Supplier Name") currentExtractedData.supplier_details.name = messageText;
             
-            pendingFieldsToFix.shift(); // Remove from queue
+            pendingFieldsToFix.shift(); 
             inputField.value = "";
             
-            // Still more fields to fix? Ask locally!
             if (pendingFieldsToFix.length > 0) {
                 inputField.placeholder = `Please enter: ${pendingFieldsToFix[0]}...`;
                 appendMessage(`Got it! Now I just need: **${pendingFieldsToFix[0]}**`, "bot");
                 return; 
             } 
             
-            // All done! Send the completed JSON to the server
-            inputField.placeholder = "Type or speak instructions...";
+            inputField.placeholder = "Type instructions or CONSOLIDATE...";
             scanBtn.textContent = "Scan";
-            scanBtn.style.backgroundColor = "#3498db";
+            scanBtn.style.backgroundColor = "#3b82f6";
             
             appendMessage("All data collected! Verifying with the database...", "bot");
             
@@ -148,7 +506,7 @@
             return;
         }
 
-        // --- SCENARIO B: Normal Document Scan ---
+        // SCENARIO B: Normal Document Scan
         if (!messageText && !file) return;
 
         appendMessage(file ? `📎 [File: ${file.name}]\n${messageText || "Please analyze this document."}` : messageText, "user");
@@ -181,45 +539,38 @@
                 inputField.placeholder = `Please enter: ${pendingFieldsToFix[0]}...`;
                 inputField.focus();
                 scanBtn.textContent = "💾 Save";
-                scanBtn.style.backgroundColor = "#f39c12"; 
+                scanBtn.style.backgroundColor = "#e67e22"; 
             }
             
-            // --- CREATE THE MESSAGE BUBBLE ONCE ---
             const msgDiv = document.createElement("div");
             msgDiv.className = "message bot";
             msgDiv.innerHTML = data.reply.replace(/\n/g, '<br>');
+            speakAIResponse(data.reply);
             
-            // 🚀 NEW: If the backend sent a certificate, attach the shiny download button!
             if (data.certificate) {
                 const certBtn = document.createElement("button");
                 certBtn.innerHTML = "📄 View / Print Official Certificate";
                 certBtn.style.marginTop = "15px";
-                certBtn.style.backgroundColor = "#2ecc71"; // Nice green color
+                certBtn.style.backgroundColor = "#10b981"; 
                 certBtn.style.width = "100%";
                 
-                // When clicked, open the HTML in a new tab and trigger the print/save dialog
                 certBtn.onclick = function() {
                     const printWindow = window.open('', '_blank');
                     printWindow.document.write(data.certificate);
                     printWindow.document.close();
-                    
-                    // Add a tiny delay to ensure styles load, then trigger the PDF/Print prompt
-                    setTimeout(() => {
-                        printWindow.print();
-                    }, 500);
+                    setTimeout(() => { printWindow.print(); }, 500);
                 };
-                
-                msgDiv.appendChild(certBtn); // Attach button to the bubble
+                msgDiv.appendChild(certBtn);
             }
 
-            chatBox.appendChild(msgDiv); // Push the bubble to the chat screen
+            chatBox.appendChild(msgDiv);
             chatBox.scrollTop = chatBox.scrollHeight;
 
         } catch (error) {
             console.error("Error:", error);
             const chatBox = document.getElementById("chat-box");
             chatBox.removeChild(chatBox.lastChild);
-            appendMessage("Error: Could not connect to the backend.", "bot");
+            appendMessage("Error: Could not connect to the backend. Please check server logs.", "bot");
         }
     }
 
@@ -233,6 +584,64 @@
     }
 
     function handleKeyPress(event) { if (event.key === "Enter") sendMessage(); }
+
+    let usageChartInstance = null;
+
+    async function fetchTokenData() {
+        try {
+            const response = await fetch("http://localhost:8000/api/tokens");
+            const data = await response.json();
+            
+            // Update UI Cards
+            document.getElementById("token-remaining").innerText = data.remaining.toLocaleString();
+            document.getElementById("token-limit").innerText = data.limit.toLocaleString();
+            document.getElementById("token-cost").innerText = "RM " + data.cost_rm.toFixed(2);
+            
+            // Calculate and animate Progress Bar
+            const percentUsed = (data.used / data.limit) * 100;
+            const bar = document.getElementById("quota-bar");
+            bar.style.width = percentUsed + "%";
+            
+            // Change bar color if running low!
+            if (percentUsed > 80) bar.style.background = "#ef4444"; // Red
+            else if (percentUsed > 50) bar.style.background = "#f59e0b"; // Yellow
+            else bar.style.background = "#10b981"; // Green
+
+            // Render Chart.js Graph
+            const ctx = document.getElementById('usageChart').getContext('2d');
+            
+            // Destroy old chart if you click the tab multiple times
+            if (usageChartInstance) usageChartInstance.destroy(); 
+            
+            usageChartInstance = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: data.chart_labels,
+                    datasets: [{
+                        label: 'Tokens Consumed',
+                        data: data.chart_data,
+                        borderColor: '#3b82f6',
+                        backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                        borderWidth: 2,
+                        fill: true,
+                        tension: 0.4 // Smooth curves
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        y: { beginAtZero: true, grid: { borderDash: [5, 5] } },
+                        x: { grid: { display: false } }
+                    }
+                }
+            });
+            
+        } catch (error) {
+            console.error("Token fetch error:", error);
+        }
+    }
 </script>
 
 </body>
