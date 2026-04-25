@@ -132,6 +132,55 @@ async def chat_endpoint(
 ):
     base64_image = None
     document_text = None
+    cleaned_message = message.strip().upper()
+    # --- SCENARIO C: THE ADMIN CONSOLIDATION COMMAND ---
+    if cleaned_message == "CONSOLIDATE":
+        try:
+            conn = sqlite3.connect('umhackathon_2026.db')
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            
+            # 1. Find all pending cash receipts
+            cursor.execute("SELECT * FROM retail_cash_receipts WHERE status = 'PENDING_CONSOLIDATION'")
+            pending_receipts = cursor.fetchall()
+            
+            if not pending_receipts:
+                return {"reply": "ℹ️ **No pending cash receipts found for consolidation.**", "action": "ANALYSIS_COMPLETE"}
+                
+            # 2. Sum up the grand total and count transactions
+            total_consolidated_amount = sum(float(row['total_amount']) for row in pending_receipts)
+            receipt_count = len(pending_receipts)
+            
+            # 3. Generate the single official LHDN UUID for the whole batch
+            consolidation_uuid = str(uuid.uuid4())
+            consolidation_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            consolidation_invoice_no = f"CONSOL-{datetime.now().strftime('%Y%m%d-%H%M')}"
+            
+            # 4. Save the massive aggregated invoice into the official approved ledger
+            cursor.execute("""
+                INSERT INTO approved_e_invoices 
+                (invoice_number, supplier_ssm, buyer_name, grand_total, lhdn_uuid, approved_time) 
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (consolidation_invoice_no, "RETAIL-CONSOLIDATED", f"General Public ({receipt_count} Receipts)", total_consolidated_amount, consolidation_uuid, consolidation_date))
+            
+            # 5. Mark all individual receipts as successfully processed so they aren't double-counted next month
+            cursor.execute("UPDATE retail_cash_receipts SET status = 'CONSOLIDATED' WHERE status = 'PENDING_CONSOLIDATION'")
+            conn.commit()
+            
+            reply_text = (
+                f"📦 **MONTH-END CONSOLIDATION COMPLETE**\n\n"
+                f"Successfully aggregated **{receipt_count}** daily retail cash receipts.\n"
+                f"• **Consolidated Value:** RM {total_consolidated_amount:.2f}\n"
+                f"• **Master Invoice No:** {consolidation_invoice_no}\n"
+                f"• **LHDN Bridge UUID:** **{consolidation_uuid}**\n\n"
+                f"✅ This aggregated data has been pushed to the LHDN API."
+            )
+            return {"reply": reply_text, "action": "ANALYSIS_COMPLETE"}
+            
+        except sqlite3.Error as e:
+            return {"reply": f"🚨 Database Error during consolidation: {e}", "action": "ERROR"}
+        finally:
+            if conn: conn.close()
 
     # --- SCENARIO A: Human-in-the-loop returning completed data ---
     if message.startswith("FINAL_DATA:"):
@@ -322,14 +371,44 @@ async def chat_endpoint(
         disp_sup_ssm = f"{disp_sup_ssm} ⚠️ [Not in DB]"
         disp_sup_tin = f"{disp_sup_tin} ⚠️ [Not in DB]"
 
-    if fraud_flags:
+    # 1. Determine if this is a B2C Cash Receipt or a B2B Enterprise Invoice
+    buyer_name_check = str(buyer.get('name', '')).strip().lower()
+    is_cash_receipt = (buyer_name_check == "" or buyer_name_check == "null" or "general public" in buyer_name_check or "cash" in buyer_name_check)
+
+    if is_cash_receipt:
+        # --- ROUTE A: B2C Cash Receipt (Park it for Month-End Consolidation) ---
+        status_header = "🛒 **CASH RECEIPT LOGGED (PENDING CONSOLIDATION)**"
+        disp_buy_name = "General Public (B2C)"
+        
+        try:
+            conn = sqlite3.connect('umhackathon_2026.db')
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO retail_cash_receipts 
+                (receipt_number, transaction_date, total_amount, status) 
+                VALUES (?, ?, ?, 'PENDING_CONSOLIDATION')
+            """, (disp_inv_num, disp_date, financials.get('grand_total', 0)))
+            conn.commit()
+            verification_summary.append("✅ Receipt saved to daily retail ledger. Awaiting month-end LHDN consolidation.")
+        except sqlite3.Error as e:
+            print(f"Failed to save receipt: {e}")
+        finally:
+            if conn: conn.close()
+            
+        metadata['lhdn_uuid'] = "⏳ *[Pending Monthly Consolidation]*"
+
+    elif fraud_flags:
+        # --- ROUTE B: B2B Invoice with Fraud ---
         status_header = "🛑 **FRAUD DETECTED (ACTION REQUIRED)**"
+        
     elif warnings:
+        # --- ROUTE C: B2B Invoice with Warnings ---
         status_header = "⚠️ **PENDING REVIEW (UNREGISTERED VENDOR OR UNKNOWN SKUS)**"
+        
     else:
+        # --- ROUTE D: Perfect B2B Invoice (Bridge immediately) ---
         status_header = "✅ **INVOICE APPROVED & LHDN CERTIFIED**"
         
-        # THE LHDN GATEWAY SIMULATOR
         current_uuid = metadata.get('lhdn_uuid')
         if not current_uuid or str(current_uuid).lower() == "null":
             new_lhdn_uuid = str(uuid.uuid4())
@@ -347,15 +426,12 @@ async def chat_endpoint(
             except sqlite3.Error as e:
                 print(f"Failed to save to approve_db: {e}")
             finally:
-                if conn:
-                    conn.close()
-                    
+                if conn: conn.close()
+                
             metadata['lhdn_uuid'] = f"**{new_lhdn_uuid}** *(Auto-Generated)*"
             verification_summary.append(f"✅ Document successfully bridged to LHDN API at {approved_time_str}")
 
-            # -------------------------------------------------------------
             # 🚀 ZERO-TOKEN CERTIFICATE GENERATOR (Pure Python!)
-            # -------------------------------------------------------------
             certificate_html = f"""
             <!DOCTYPE html>
             <html>
