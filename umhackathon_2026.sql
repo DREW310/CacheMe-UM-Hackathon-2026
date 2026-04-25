@@ -3,7 +3,7 @@
 -- https://www.phpmyadmin.net/
 --
 -- Host: 127.0.0.1:3306
--- Generation Time: Apr 22, 2026 at 06:42 PM
+-- Generation Time: Apr 25, 2026 at 09:44 AM
 -- Server version: 10.4.28-MariaDB
 -- PHP Version: 8.2.4
 
@@ -20,6 +20,22 @@ SET time_zone = "+00:00";
 --
 -- Database: `umhackathon 2026`
 --
+
+-- --------------------------------------------------------
+
+--
+-- Table structure for table `approved_e_invoices`
+--
+
+CREATE TABLE `approved_e_invoices` (
+  `approval_id` int(11) NOT NULL,
+  `invoice_number` varchar(100) NOT NULL,
+  `supplier_ssm` varchar(50) NOT NULL,
+  `buyer_name` varchar(255) NOT NULL,
+  `grand_total` decimal(12,2) NOT NULL,
+  `lhdn_uuid` varchar(100) NOT NULL,
+  `approved_time` datetime NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 -- --------------------------------------------------------
 
@@ -251,7 +267,7 @@ CREATE TABLE `vendors` (
   `vendor_id` int(11) NOT NULL,
   `company_name` varchar(255) NOT NULL,
   `ssm_number` varchar(50) NOT NULL,
-  `tax_id` varchar(50) NOT NULL,
+  `tin_number` varchar(50) NOT NULL,
   `status` enum('ACTIVE','BLACKLISTED') DEFAULT 'ACTIVE'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
@@ -259,7 +275,7 @@ CREATE TABLE `vendors` (
 -- Dumping data for table `vendors`
 --
 
-INSERT INTO `vendors` (`vendor_id`, `company_name`, `ssm_number`, `tax_id`, `status`) VALUES
+INSERT INTO `vendors` (`vendor_id`, `company_name`, `ssm_number`, `tin_number`, `status`) VALUES
 (1, 'Dell Global Business Center Sdn Bhd', '199501037533', 'C1234567890', 'ACTIVE'),
 (2, 'Telekom Malaysia Berhad', '198401016183', 'C9876543210', 'ACTIVE'),
 (3, 'SNS Network (M) Sdn Bhd', '199801015502', 'C5554443330', 'ACTIVE'),
@@ -485,6 +501,12 @@ INSERT INTO `vendor_contracts` (`contract_id`, `vendor_id`, `sku`, `agreed_unit_
 --
 
 --
+-- Indexes for table `approved_e_invoices`
+--
+ALTER TABLE `approved_e_invoices`
+  ADD PRIMARY KEY (`approval_id`);
+
+--
 -- Indexes for table `processed_invoices`
 --
 ALTER TABLE `processed_invoices`
@@ -516,6 +538,12 @@ ALTER TABLE `vendor_contracts`
 --
 -- AUTO_INCREMENT for dumped tables
 --
+
+--
+-- AUTO_INCREMENT for table `approved_e_invoices`
+--
+ALTER TABLE `approved_e_invoices`
+  MODIFY `approval_id` int(11) NOT NULL AUTO_INCREMENT;
 
 --
 -- AUTO_INCREMENT for table `processed_invoices`
