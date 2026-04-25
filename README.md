@@ -114,11 +114,12 @@ This command will:
 
 ### Optional: Seed Additional Tables
 
-If you need to add specific vendor or product data:
+If you need to populate additional tables with sample data:
 
 ```bash
 python add_approved_table.py
 python add_retail_table.py
+python add_audit_table.py
 ```
 
 ---
@@ -178,6 +179,7 @@ UM hacketon 2026/
 ├── setup_db.py                      # Database initialization script
 ├── add_approved_table.py            # Populate approved invoices table
 ├── add_retail_table.py              # Populate retail cash receipts table
+├── add_audit_table.py               # Populate audit logs table
 ├── test_api.py                      # API testing utilities
 ├── requirements.txt                 # Python dependencies
 ├── umhackathon_2026.db             # SQLite database (created after setup_db.py runs)
